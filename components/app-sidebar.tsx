@@ -5,6 +5,7 @@ import {
   Home,
   LayoutDashboard,
   BookOpen,
+  Shield,
   LogOut,
   ChevronsUpDown,
 } from "lucide-react"
@@ -51,6 +52,11 @@ const navItems = [
     title: "Examples",
     url: "/examples",
     icon: BookOpen,
+  },
+  {
+    title: "Admin",
+    url: "/admin",
+    icon: Shield,
   },
 ]
 

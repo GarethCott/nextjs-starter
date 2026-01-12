@@ -17,7 +17,7 @@ import { getGraphQLClient } from '@/lib/graphql-client'
 // Query for your users table
 const GET_USERS = `
   query GetUsers {
-    users {
+    users(limit: 100, order_by: { created_at: desc }) {
       id
       cognito_sub
       name

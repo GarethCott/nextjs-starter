@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runWithAmplifyServerContext } from '@/lib/amplify-server-utils'
 import { fetchAuthSession } from 'aws-amplify/auth/server'
-import { AdminUpdateUserAttributesCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
+import { 
+  AdminUpdateUserAttributesCommand,
+  AdminGetUserCommand,
+  CognitoIdentityProviderClient 
+} from '@aws-sdk/client-cognito-identity-provider'
+import { getServerGraphQLClient } from '@/lib/graphql-client'
+import { UPDATE_USER_ROLE_MUTATION, type UpdateUserRoleResponse } from '@/hooks/use-upsert-user'
 
 /**
  * API Route: Update User Role
  * 
- * This endpoint allows admins to update user roles in Cognito.
- * The role will be stored in the custom:role attribute and will
- * automatically be included in the JWT via PreTokenGeneration Lambda.
+ * This endpoint allows admins to update user roles in BOTH Cognito AND Hasura.
+ * 
+ * Steps:
+ * 1. Updates the custom:role attribute in Cognito
+ * 2. Creates/updates the user in Hasura with the new role
+ * 
+ * The role will be automatically included in the JWT via PreTokenGeneration Lambda.
  * 
  * POST /api/admin/update-role
  * Body: { userId: string, role: string }
@@ -102,10 +112,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 6. Update user role in Cognito
-    const command = new AdminUpdateUserAttributesCommand({
+    // 6. Get user details from Cognito first
+    const getUserCommand = new AdminGetUserCommand({
       UserPoolId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID,
-      Username: userId, // Cognito uses sub as username internally
+      Username: userId,
+    })
+    
+    const cognitoUser = await cognito.send(getUserCommand)
+    const userEmail = cognitoUser.UserAttributes?.find(attr => attr.Name === 'email')?.Value || null
+    const userName = cognitoUser.UserAttributes?.find(attr => attr.Name === 'name')?.Value || null
+    const userPhone = cognitoUser.UserAttributes?.find(attr => attr.Name === 'phone_number')?.Value || null
+
+    // 7. Update user role in Cognito
+    const updateCommand = new AdminUpdateUserAttributesCommand({
+      UserPoolId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID,
+      Username: userId,
       UserAttributes: [
         {
           Name: 'custom:role',
@@ -114,39 +135,26 @@ export async function POST(request: NextRequest) {
       ],
     })
 
-    await cognito.send(command)
+    await cognito.send(updateCommand)
 
-    // 7. Optionally update role in Hasura (if you have a users table)
-    // This requires making a GraphQL request to your Hasura instance
-    // using the admin secret
-    
-    // Example:
-    // const hasuraResponse = await fetch(process.env.NEXT_PUBLIC_HASURA_GRAPHQL_URL!, {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'x-hasura-admin-secret': process.env.HASURA_ADMIN_SECRET!,
-    //   },
-    //   body: JSON.stringify({
-    //     query: `
-    //       mutation UpdateUserRole($cognito_sub: String!, $role: String!) {
-    //         update_users(
-    //           where: { cognito_sub: { _eq: $cognito_sub } }
-    //           _set: { role: $role }
-    //         ) {
-    //           affected_rows
-    //         }
-    //       }
-    //     `,
-    //     variables: { cognito_sub: userId, role },
-    //   }),
-    // })
+    // 8. Update user role in Hasura (creates user if doesn't exist)
+    const client = getServerGraphQLClient()
+    const hasuraData = await client.request<UpdateUserRoleResponse>(UPDATE_USER_ROLE_MUTATION, {
+      cognito_sub: userId,
+      email: userEmail,
+      name: userName,
+      phone_number: userPhone,
+      role: role,
+    })
+
+    const updatedUser = hasuraData.insert_users.returning[0]
 
     return NextResponse.json({
       success: true,
-      message: `User role updated to ${role}`,
+      message: `User role updated to ${role} in both Cognito and Hasura`,
       userId,
       role,
+      hasuraUser: updatedUser,
     })
 
   } catch (error) {

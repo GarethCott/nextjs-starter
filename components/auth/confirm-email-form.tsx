@@ -12,9 +12,10 @@ import Link from 'next/link'
 export function ConfirmEmailForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { confirmSignUp, resendConfirmationCode, loading } = useAuth()
+  const { confirmSignUp, signIn: authSignIn, resendConfirmationCode, loading } = useAuth()
   
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [confirmationCode, setConfirmationCode] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
@@ -45,14 +46,63 @@ export function ConfirmEmailForm() {
       return
     }
 
+    if (!password || password.trim() === '') {
+      setLocalError('Password is required to automatically sign you in and sync to database')
+      return
+    }
+
     try {
+      // 1. Confirm the email
       await confirmSignUp(email, confirmationCode)
-      setSuccess(true)
       
-      // Redirect to login after 2 seconds
-      setTimeout(() => {
-        router.push('/login?confirmed=true')
-      }, 2000)
+      // 2. Auto sign-in after confirmation (skip redirect so we can sync first)
+      try {
+        await authSignIn(email, password, true) // skipRedirect = true
+        
+        // 3. Get consent data from localStorage
+        let consentData = null
+        if (typeof window !== 'undefined') {
+          const storedConsent = localStorage.getItem('pendingConsent')
+          if (storedConsent) {
+            consentData = JSON.parse(storedConsent)
+            localStorage.removeItem('pendingConsent') // Clean up
+          }
+        }
+        
+        // 4. Sync user to Hasura with consent data
+        const syncResponse = await fetch('/api/auth/sync-user', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            popiaConsent: consentData?.popiaConsent || false,
+            marketingConsent: consentData?.marketingConsent || false,
+            popiaConsentDate: consentData?.consentDate || null,
+          }),
+        })
+        
+        if (!syncResponse.ok) {
+          const errorData = await syncResponse.json()
+          console.error('Failed to sync user to Hasura:', errorData)
+          setLocalError('Account created but sync to database failed. Please contact support.')
+          return
+        }
+        
+        console.log('User successfully synced to Hasura')
+        setSuccess(true)
+        
+        // 4. Now redirect to dashboard
+        router.push('/dashboard')
+        
+      } catch (signInError) {
+        console.error('Auto sign-in failed:', signInError)
+        setLocalError('Email confirmed but auto sign-in failed. Please try signing in manually.')
+        // If auto sign-in fails, redirect to login page after 2 seconds
+        setTimeout(() => {
+          router.push('/login?confirmed=true&email=' + encodeURIComponent(email))
+        }, 2000)
+      }
     } catch (err) {
       // Handle specific confirmation errors
       if (err instanceof Error) {
@@ -115,10 +165,10 @@ export function ConfirmEmailForm() {
         <CardContent className="space-y-4">
           <div className="bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm p-4 rounded-md text-center">
             <p className="font-medium mb-2">Your email has been verified successfully!</p>
-            <p className="text-xs">You can now sign in with your credentials.</p>
+            <p className="text-xs">Signing you in and setting up your account...</p>
           </div>
           <p className="text-xs text-center text-muted-foreground">
-            Redirecting to sign in page in 2 seconds...
+            Please wait while we complete your account setup...
           </p>
         </CardContent>
         <CardFooter>
@@ -189,6 +239,23 @@ export function ConfirmEmailForm() {
           </div>
 
           <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              disabled={loading}
+              autoComplete="current-password"
+            />
+            <p className="text-xs text-muted-foreground">
+              Required to automatically sign you in after confirmation
+            </p>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="code">Confirmation Code</Label>
             <Input
               id="code"
@@ -204,8 +271,8 @@ export function ConfirmEmailForm() {
           </div>
         </CardContent>
         <CardFooter className="flex flex-col gap-2">
-          <Button type="submit" className="w-full" disabled={loading || !confirmationCode || !email}>
-            {loading ? 'Confirming...' : 'Confirm Email'}
+          <Button type="submit" className="w-full" disabled={loading || !confirmationCode || !email || !password}>
+            {loading ? 'Confirming...' : 'Confirm Email & Sign In'}
           </Button>
           
           <div className="flex gap-2 w-full">

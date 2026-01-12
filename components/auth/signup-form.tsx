@@ -6,20 +6,35 @@ import { useAuth } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import Link from 'next/link'
 
 export function SignupForm() {
   const router = useRouter()
   const { signUp, loading } = useAuth()
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [popiaConsent, setPopiaConsent] = useState(false)
+  const [marketingConsent, setMarketingConsent] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     setLocalError(null)
+
+    if (!name || name.trim() === '') {
+      setLocalError('Name is required')
+      return
+    }
+
+    if (!popiaConsent) {
+      setLocalError('You must accept the Privacy Policy and Terms of Service to continue')
+      return
+    }
 
     if (password !== confirmPassword) {
       setLocalError('Passwords do not match')
@@ -32,10 +47,25 @@ export function SignupForm() {
     }
 
     try {
-      const result = await signUp(email, password)
+      // Pass name and phone_number as custom attributes
+      const attributes: Record<string, string> = {
+        name,
+      }
+      if (phoneNumber && phoneNumber.trim() !== '') {
+        attributes.phone_number = phoneNumber
+      }
+      const result = await signUp(email, password, attributes)
       
       // Check if confirmation is needed
       if (result.nextStep?.signUpStep === 'CONFIRM_SIGN_UP') {
+        // Store consent data in localStorage to use after confirmation
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('pendingConsent', JSON.stringify({
+            popiaConsent,
+            marketingConsent,
+            consentDate: new Date().toISOString()
+          }))
+        }
         // Redirect to confirmation page
         router.push(`/confirm-email?email=${encodeURIComponent(email)}`)
       } else if (result.nextStep?.signUpStep === 'DONE') {
@@ -91,6 +121,20 @@ export function SignupForm() {
           )}
           
           <div className="space-y-2">
+            <Label htmlFor="name">Full Name</Label>
+            <Input
+              id="name"
+              type="text"
+              placeholder="John Doe"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              disabled={loading}
+              autoComplete="name"
+            />
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
               id="email"
@@ -102,6 +146,22 @@ export function SignupForm() {
               disabled={loading}
               autoComplete="email"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="phoneNumber">Phone Number (Optional)</Label>
+            <Input
+              id="phoneNumber"
+              type="tel"
+              placeholder="+27 12 345 6789"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              disabled={loading}
+              autoComplete="tel"
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional - for notifications and account recovery
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -134,9 +194,50 @@ export function SignupForm() {
               autoComplete="new-password"
             />
           </div>
+
+          <div className="space-y-4 pt-2">
+            <div className="flex items-start space-x-2">
+              <Checkbox 
+                id="popiaConsent" 
+                checked={popiaConsent}
+                onCheckedChange={(checked) => setPopiaConsent(checked === true)}
+                disabled={loading}
+                required
+              />
+              <label 
+                htmlFor="popiaConsent" 
+                className="text-sm leading-tight cursor-pointer"
+              >
+                I accept the{' '}
+                <Link href="/privacy-policy" className="text-primary hover:underline" target="_blank">
+                  Privacy Policy
+                </Link>
+                {' '}and{' '}
+                <Link href="/terms" className="text-primary hover:underline" target="_blank">
+                  Terms of Service
+                </Link>
+                {' '}(required for POPIA compliance)
+              </label>
+            </div>
+
+            <div className="flex items-start space-x-2">
+              <Checkbox 
+                id="marketingConsent" 
+                checked={marketingConsent}
+                onCheckedChange={(checked) => setMarketingConsent(checked === true)}
+                disabled={loading}
+              />
+              <label 
+                htmlFor="marketingConsent" 
+                className="text-sm leading-tight cursor-pointer text-muted-foreground"
+              >
+                I want to receive promotional emails and updates (optional)
+              </label>
+            </div>
+          </div>
         </CardContent>
         <CardFooter className="flex flex-col gap-2">
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" className="w-full" disabled={loading || !popiaConsent}>
             {loading ? 'Creating account...' : 'Sign Up'}
           </Button>
           

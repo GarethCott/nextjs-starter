@@ -18,11 +18,17 @@ export function LoginForm() {
   const [localError, setLocalError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
-  // Check for confirmation success message
+  // Check for confirmation success message and pre-fill email
   useEffect(() => {
     const confirmed = searchParams.get('confirmed')
+    const emailParam = searchParams.get('email')
+    
     if (confirmed === 'true') {
       setSuccessMessage('Email confirmed successfully! You can now sign in.')
+    }
+    
+    if (emailParam) {
+      setEmail(decodeURIComponent(emailParam))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

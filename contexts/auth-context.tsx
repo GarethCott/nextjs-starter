@@ -30,7 +30,7 @@ interface AuthContextType {
   user: User | null
   loading: boolean
   error: string | null
-  signIn: (email: string, password: string) => Promise<void>
+  signIn: (email: string, password: string, skipRedirect?: boolean) => Promise<void>
   signUp: (email: string, password: string, attributes?: Record<string, string>) => Promise<SignUpOutput>
   signOut: () => Promise<void>
   confirmSignUp: (email: string, code: string) => Promise<void>
@@ -93,13 +93,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const handleSignIn = async (email: string, password: string) => {
+  const handleSignIn = async (email: string, password: string, skipRedirect = false) => {
     try {
       setLoading(true)
       setError(null)
       
       await signIn({ username: email, password })
       await checkUser()
+      
+      // Redirect to dashboard after successful sign in (unless skipRedirect is true)
+      if (!skipRedirect && typeof window !== 'undefined') {
+        window.location.href = '/dashboard'
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to sign in'
       setError(message)
